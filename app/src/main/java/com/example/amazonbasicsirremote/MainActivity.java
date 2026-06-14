@@ -1,7 +1,9 @@
 package com.example.amazonbasicsirremote;
 
+import android.Manifest;
 import android.app.Activity;
-import android.bluetooth.BluetoothGattCharacteristic;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -17,6 +19,7 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.Map;
 
@@ -43,10 +46,12 @@ public class MainActivity extends Activity {
     private LedBleClient ledBleClient;
     private final Handler bluetoothHandler = new Handler(Looper.getMainLooper());
     private String bluetoothStatus = "Bluetooth scanning";
+    private static final int REQUEST_BLE_PERMISSIONS = 1001;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        requestBlePermissionsIfNeeded();
         irTransmitter = new IrTransmitter(this);
         ledBleClient = new LedBleClient(this, new LedBleClient.Listener() {
             @Override public void onStatusChanged(String status) {
@@ -62,11 +67,6 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> updateStatus());
             }
         });
-        ledBleClient.setWriteCharacteristic(
-                LedBleCommandsJava.SERVICE_UUID,
-                LedBleCommandsJava.WRITE_CHARACTERISTIC_UUID,
-                BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-        );
         setContentView(buildUi());
         updateDeviceControls();
         updateStatus();
@@ -205,7 +205,12 @@ public class MainActivity extends Activity {
             updateLedButtonStates();
             if (selectedTransport == ControlTransport.BT) {
                 bluetoothStatus = "Bluetooth scanning";
-                ledBleClient.startScan();
+                if (hasBlePermissions()) {
+                    ledBleClient.connectFirstKnownLedDevice();
+                } else {
+                    requestBlePermissionsIfNeeded();
+                    bluetoothStatus = "BLE permissions are required before scanning";
+                }
                 bluetoothHandler.postDelayed(() -> {
                     if (selectedTransport == ControlTransport.BT && "Bluetooth scanning".equals(bluetoothStatus)) {
                         ledBleClient.stopScan();
@@ -293,7 +298,7 @@ public class MainActivity extends Activity {
 
     private void sendLedCommand(LedIrCommands.Command command) {
         if (selectedTransport == ControlTransport.BT) {
-            ledBleClient.writeCommand(bleCommandFor(command));
+            sendBleCommand(command);
             Toast.makeText(this, command + " sent over BT", Toast.LENGTH_SHORT).show();
             updateLedState(command);
             updateStatus();
@@ -309,28 +314,38 @@ public class MainActivity extends Activity {
         updateStatus();
     }
 
-    private byte[] bleCommandFor(LedIrCommands.Command command) {
+    private void sendBleCommand(LedIrCommands.Command command) {
         switch (command) {
             case POWER_ON_OFF:
-                return LedBleCommandsJava.power(!ledState.isPowerOn());
+                ledBleClient.sendPower(!ledState.isPowerOn());
+                break;
             case BRIGHTNESS_DOWN:
-                return LedBleCommandsJava.brightness(Math.max(0, ledState.getBrightnessPercent() - 10));
+                ledBleClient.sendBrightness(Math.max(0, ledState.getBrightnessPercent() - 10));
+                break;
             case BRIGHTNESS_UP:
-                return LedBleCommandsJava.brightness(Math.min(100, ledState.getBrightnessPercent() + 10));
+                ledBleClient.sendBrightness(Math.min(100, ledState.getBrightnessPercent() + 10));
+                break;
             case RED:
-                return LedBleCommandsJava.rgb(255, 0, 0);
+                ledBleClient.sendColor(255, 0, 0);
+                break;
             case GREEN:
-                return LedBleCommandsJava.rgb(0, 255, 0);
+                ledBleClient.sendColor(0, 255, 0);
+                break;
             case BLUE:
-                return LedBleCommandsJava.rgb(0, 0, 255);
+                ledBleClient.sendColor(0, 0, 255);
+                break;
             case WHITE:
-                return LedBleCommandsJava.rgb(255, 255, 255);
+                ledBleClient.sendColor(255, 255, 255);
+                break;
             case MODE_EFFECT:
-                return LedBleCommandsJava.effect(LedBleCommandsJava.Effect.JUMP_7_COLORS);
+                ledBleClient.writeCommand(LedBleCommandsJava.effect(LedBleCommandsJava.Effect.JUMP_7_COLORS));
+                break;
             case SPEED_DOWN:
-                return LedBleCommandsJava.effect(LedBleCommandsJava.Effect.FADE_7_COLORS, 0x01);
+                ledBleClient.writeCommand(LedBleCommandsJava.effect(LedBleCommandsJava.Effect.FADE_7_COLORS, 0x01));
+                break;
             case SPEED_UP:
-                return LedBleCommandsJava.effect(LedBleCommandsJava.Effect.FADE_7_COLORS, 0x1f);
+                ledBleClient.writeCommand(LedBleCommandsJava.effect(LedBleCommandsJava.Effect.FADE_7_COLORS, 0x1f));
+                break;
             default:
                 throw new IllegalArgumentException("No BLE command mapped for " + command);
         }
@@ -396,6 +411,44 @@ public class MainActivity extends Activity {
         if (status.contains("Connected") || status.contains("ready")) return "Bluetooth connected";
         if (status.contains("unavailable") || status.contains("No BLE")) return "No BLE device found";
         return status;
+    }
+
+    private void requestBlePermissionsIfNeeded() {
+        if (hasBlePermissions()) return;
+        ArrayList<String> permissions = new ArrayList<>();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.BLUETOOTH_SCAN);
+            }
+            if (checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.BLUETOOTH_CONNECT);
+            }
+        } else if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            permissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
+        }
+        if (!permissions.isEmpty()) {
+            requestPermissions(permissions.toArray(new String[0]), REQUEST_BLE_PERMISSIONS);
+        }
+    }
+
+    private boolean hasBlePermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            return checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+                    && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
+        }
+        return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_BLE_PERMISSIONS) {
+            bluetoothStatus = hasBlePermissions() ? "Bluetooth permissions granted" : "BLE permissions are required before scanning";
+            if (selectedTransport == ControlTransport.BT && hasBlePermissions()) {
+                ledBleClient.connectFirstKnownLedDevice();
+            }
+            updateStatus();
+        }
     }
 
     @Override
