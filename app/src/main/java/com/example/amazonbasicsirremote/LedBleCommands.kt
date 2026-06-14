@@ -2,43 +2,70 @@ package com.example.amazonbasicsirremote
 
 import java.util.UUID
 
-/**
- * Packet builder for the captured LED BLE controller protocol.
- *
- * The controller accepts nine-byte packets on the FFF3 write characteristic:
- * 7e <opcode> <payload 1..4> <checksum> 00 ef. The checksum is the low byte of
- * the opcode plus the four payload bytes.
- */
+/** Builds protocol-specific command packets for supported LED BLE controllers. */
 object LedBleCommands {
-    val ServiceUuid: UUID = UUID.fromString("0000fff0-0000-1000-8000-00805f9b34fb")
-    val WriteCharacteristicUuid: UUID = UUID.fromString("0000fff3-0000-1000-8000-00805f9b34fb")
-    val NotifyCharacteristicUuid: UUID = UUID.fromString("0000fff4-0000-1000-8000-00805f9b34fb")
+    val DefaultProfile: LedBleProfile = LedBleProfile.ElkBledom
+
+    val ServiceUuid: UUID = DefaultProfile.serviceUuid
+    val WriteCharacteristicUuid: UUID = DefaultProfile.writeCharacteristicUuid
+    val NotifyCharacteristicUuid: UUID = DefaultProfile.notifyCharacteristicUuid!!
 
     private const val Prefix = 0x7e
-    private const val SuffixPadding = 0x00
-    private const val SuffixTerminator = 0xef
+    private const val Padding = 0x00
+    private const val Terminator = 0xef
 
-    fun power(on: Boolean): ByteArray = packet(0x04, if (on) 0x01 else 0x00, 0x00, 0x00, 0x00)
+    fun powerOn(profile: LedBleProfile = DefaultProfile): ByteArray = power(true, profile)
 
-    fun rgb(red: Int, green: Int, blue: Int): ByteArray =
-        packet(0x07, checkedByte(red, "red"), checkedByte(green, "green"), checkedByte(blue, "blue"), 0x00)
+    fun powerOff(profile: LedBleProfile = DefaultProfile): ByteArray = power(false, profile)
 
-    fun brightness(percent: Int): ByteArray {
+    fun power(on: Boolean, profile: LedBleProfile = DefaultProfile): ByteArray = when (profile.packetFormat) {
+        LedBleProfile.PacketFormat.LedBleLedLamp -> ledBlePacket(0x04, if (on) 0x01 else 0x00, 0x00, 0x00, 0x00)
+        LedBleProfile.PacketFormat.ElkBledom -> elkPacket(0x04, if (on) 0x01 else 0x00, 0x00, 0x00, 0x00)
+    }
+
+    fun rgb(red: Int, green: Int, blue: Int, profile: LedBleProfile = DefaultProfile): ByteArray {
+        val r = checkedByte(red, "red")
+        val g = checkedByte(green, "green")
+        val b = checkedByte(blue, "blue")
+        return when (profile.packetFormat) {
+            LedBleProfile.PacketFormat.LedBleLedLamp -> ledBlePacket(0x05, 0x03, r, g, b)
+            LedBleProfile.PacketFormat.ElkBledom -> elkPacket(0x07, r, g, b, 0x00)
+        }
+    }
+
+    fun brightness(percent: Int, profile: LedBleProfile = DefaultProfile): ByteArray {
         require(percent in 0..100) { "Brightness percent must be in 0..100: $percent" }
-        return packet(0x01, percent, 0x00, 0x00, 0x00)
+        return when (profile.packetFormat) {
+            LedBleProfile.PacketFormat.LedBleLedLamp -> ledBlePacket(0x01, percent, 0x00, 0x00, 0x00)
+            LedBleProfile.PacketFormat.ElkBledom -> elkPacket(0x01, percent, 0x00, 0x00, 0x00)
+        }
     }
 
-    fun effect(effect: Effect, speed: Int = 0x03): ByteArray {
+    fun effect(effect: Effect, speed: Int = 0x03, profile: LedBleProfile = DefaultProfile): ByteArray {
         require(speed in 0x01..0x1f) { "Effect speed must be in 1..31: $speed" }
-        return packet(0x05, effect.id, speed, 0x00, 0x00)
+        return when (profile.packetFormat) {
+            LedBleProfile.PacketFormat.LedBleLedLamp -> ledBlePacket(0x03, effect.ledBleId, speed, 0x00, 0x00)
+            LedBleProfile.PacketFormat.ElkBledom -> elkPacket(0x05, effect.elkBledomId, speed, 0x00, 0x00)
+        }
     }
 
-    fun packet(opcode: Int, payload1: Int, payload2: Int, payload3: Int, payload4: Int): ByteArray {
+    fun packet(opcode: Int, payload1: Int, payload2: Int, payload3: Int, payload4: Int): ByteArray =
+        elkPacket(opcode, payload1, payload2, payload3, payload4)
+
+    private fun ledBlePacket(opcode: Int, payload1: Int, payload2: Int, payload3: Int, payload4: Int): ByteArray {
+        val fields = intArrayOf(opcode, payload1, payload2, payload3, payload4)
+        fields.forEach { checkedByte(it, "packet field") }
+        return intArrayOf(Prefix, Padding, opcode, payload1, payload2, payload3, payload4, Padding, Terminator)
+            .map(Int::toByte)
+            .toByteArray()
+    }
+
+    private fun elkPacket(opcode: Int, payload1: Int, payload2: Int, payload3: Int, payload4: Int): ByteArray {
         val fields = intArrayOf(opcode, payload1, payload2, payload3, payload4)
         fields.forEach { checkedByte(it, "packet field") }
         val checksum = fields.sum() and 0xff
-        return intArrayOf(Prefix, opcode, payload1, payload2, payload3, payload4, checksum, SuffixPadding, SuffixTerminator)
-            .map { it.toByte() }
+        return intArrayOf(Prefix, opcode, payload1, payload2, payload3, payload4, checksum, Padding, Terminator)
+            .map(Int::toByte)
             .toByteArray()
     }
 
@@ -47,8 +74,8 @@ object LedBleCommands {
         return value
     }
 
-    enum class Effect(val id: Int) {
-        Jump7Colors(0x87),
-        Fade7Colors(0x8a),
+    enum class Effect(val ledBleId: Int, val elkBledomId: Int) {
+        Jump7Colors(0x87, 0x87),
+        Fade7Colors(0x8a, 0x8a),
     }
 }

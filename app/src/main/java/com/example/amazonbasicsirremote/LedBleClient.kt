@@ -15,7 +15,6 @@ import android.bluetooth.le.ScanResult
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import java.util.Locale
 import java.util.UUID
 
 class LedBleClient(context: Context, private val listener: Listener?) {
@@ -32,6 +31,7 @@ class LedBleClient(context: Context, private val listener: Listener?) {
     private var gatt: BluetoothGatt? = null
     private var writeCharacteristic: BluetoothGattCharacteristic? = null
     private var writeType: Int = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+    private var activeProfile: LedBleProfile = LedBleCommands.DefaultProfile
 
     fun isBluetoothReady(): Boolean = bluetoothAdapter?.isEnabled == true
 
@@ -77,11 +77,11 @@ class LedBleClient(context: Context, private val listener: Listener?) {
         writeCharacteristic = null
     }
 
-    fun sendPower(on: Boolean) = writeCommand(LedBleCommandsJava.power(on))
+    fun sendPower(on: Boolean) = writeCommand(LedBleCommands.power(on, activeProfile))
 
-    fun sendColor(r: Int, g: Int, b: Int) = writeCommand(LedBleCommandsJava.rgb(r, g, b))
+    fun sendColor(r: Int, g: Int, b: Int) = writeCommand(LedBleCommands.rgb(r, g, b, activeProfile))
 
-    fun sendBrightness(value: Int) = writeCommand(LedBleCommandsJava.brightness(value.coerceIn(0, 100)))
+    fun sendBrightness(value: Int) = writeCommand(LedBleCommands.brightness(value.coerceIn(0, 100), activeProfile))
 
     fun writeCommand(command: ByteArray) {
         val bluetoothGatt = gatt
@@ -110,6 +110,7 @@ class LedBleClient(context: Context, private val listener: Listener?) {
             val name = deviceName(device, result)
             if (!isTargetName(name)) return
             stopScan()
+            activeProfile = LedBleProfile.fromAdvertisedName(name) ?: LedBleCommands.DefaultProfile
             listener?.onDeviceFound(name)
             connect(device, name)
         }
@@ -154,14 +155,16 @@ class LedBleClient(context: Context, private val listener: Listener?) {
     }
 
     private fun findLedWriteCharacteristic(services: List<BluetoothGattService>): BluetoothGattCharacteristic? {
-        services.firstNotNullOfOrNull { service ->
-            if (service.uuid == ELK_BLEDOM_SERVICE_UUID) service.getCharacteristic(ELK_BLEDOM_WRITE_UUID) else null
+        LedBleProfile.values().firstNotNullOfOrNull { profile ->
+            services.firstOrNull { it.uuid == profile.serviceUuid }
+                ?.getCharacteristic(profile.writeCharacteristicUuid)
+                ?.also { activeProfile = profile }
         }?.let { return configureWriteType(it) }
 
         services.asSequence()
             .flatMap { it.characteristics.asSequence() }
-            .firstOrNull { it.uuid == FFE1_UUID && it.isWritable() }
-            ?.let { return configureWriteType(it) }
+            .firstOrNull { it.uuid == LedBleProfile.LedBleLedLamp.writeCharacteristicUuid && it.isWritable() }
+            ?.let { activeProfile = LedBleProfile.LedBleLedLamp; return configureWriteType(it) }
 
         return services.asSequence()
             .flatMap { it.characteristics.asSequence() }
@@ -190,8 +193,7 @@ class LedBleClient(context: Context, private val listener: Listener?) {
     }
 
     private fun isTargetName(name: String): Boolean {
-        val normalized = name.uppercase(Locale.US).replace(" ", "")
-        return TARGET_NAMES.any { normalized.contains(it) }
+        return LedBleProfile.fromAdvertisedName(name) != null
     }
 
     private fun hasScanPermission(): Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -204,11 +206,4 @@ class LedBleClient(context: Context, private val listener: Listener?) {
         context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
 
     private fun notifyStatus(status: String) = listener?.onStatusChanged(status)
-
-    companion object {
-        private val TARGET_NAMES = arrayOf("LEDBLE", "LEDLAMP", "LEDNET", "ELK-BLEDOM")
-        private val FFE1_UUID: UUID = UUID.fromString("0000ffe1-0000-1000-8000-00805f9b34fb")
-        private val ELK_BLEDOM_SERVICE_UUID: UUID = UUID.fromString("0000fff0-0000-1000-8000-00805f9b34fb")
-        private val ELK_BLEDOM_WRITE_UUID: UUID = UUID.fromString("0000fff3-0000-1000-8000-00805f9b34fb")
-    }
 }
