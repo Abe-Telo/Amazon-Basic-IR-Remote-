@@ -15,7 +15,12 @@ final class IrTransmitter {
     }
 
     void transmit(int[] commandBytes) {
+        transmitRaw(MideaIrEncoder.FREQUENCY_HZ, MideaIrEncoder.encodeMsb(commandBytes));
+    }
+
+    void transmitRaw(int frequencyHz, int[] pattern) {
         if (!hasEmitter()) throw new IllegalStateException("This phone does not report an IR blaster.");
-        manager.transmit(MideaIrEncoder.FREQUENCY_HZ, MideaIrEncoder.encodeMsb(commandBytes));
+        if (pattern.length == 0) throw new IllegalStateException("LED IR code has not been captured yet.");
+        manager.transmit(frequencyHz, pattern);
     }
 }
