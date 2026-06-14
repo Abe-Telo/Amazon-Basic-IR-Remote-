@@ -4,251 +4,254 @@ import android.app.Activity;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
-import android.view.ViewGroup;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.LinearLayout;
-import android.widget.RadioButton;
-import android.widget.RadioGroup;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.util.Locale;
-
 public class MainActivity extends Activity {
-    private IrTransmitter irTransmitter;
-    private final MideaIrEncoder irEncoder = new MideaIrEncoder();
-
-    private RemoteState remoteState = new RemoteState(
-            RemoteState.Mode.COOL,
-            RemoteState.FanSpeed.AUTO,
+    private DeviceType selectedDevice = DeviceType.AMAZON_BASICS_AC;
+    private final AcRemoteState acState = new AcRemoteState(
+            AmazonBasicsCommands.Mode.COOL,
+            AmazonBasicsCommands.FanSpeed.AUTO,
             72
     );
+    private final LedControllerState ledState = new LedControllerState();
 
-    private TextView temperatureDisplay;
-    private TextView commandPreview;
-    private RadioGroup modeSelector;
-    private RadioGroup fanSelector;
-    private boolean updatingSelectors;
+    private TextView status;
+    private TextView tempLabel;
+    private TextView ledStateLabel;
+    private LinearLayout acControls;
+    private LinearLayout ledControls;
+    private IrTransmitter irTransmitter;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         irTransmitter = new IrTransmitter(this);
-        setContentView(createRemoteLayout());
-        renderState();
+        setContentView(buildUi());
+        updateDeviceControls();
+        updateStatus();
     }
 
-    private LinearLayout createRemoteLayout() {
+    private View buildUi() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER_HORIZONTAL);
-        int padding = dp(24);
-        root.setPadding(padding, padding, padding, padding);
+        root.setPadding(32, 48, 32, 32);
 
         TextView title = new TextView(this);
         title.setText("Amazon Basics IR Remote");
         title.setTextSize(24);
         title.setGravity(Gravity.CENTER);
-        root.addView(title, matchWrapParams());
+        root.addView(title, fullWidth());
 
-        TextView subtitle = new TextView(this);
-        subtitle.setText("Choose a state, then tap Send. Toggles transmit immediately.");
-        subtitle.setGravity(Gravity.CENTER);
-        subtitle.setPadding(0, dp(8), 0, dp(16));
-        root.addView(subtitle, matchWrapParams());
+        status = new TextView(this);
+        status.setGravity(Gravity.CENTER);
+        root.addView(status, fullWidth());
 
-        LinearLayout temperatureRow = horizontalRow();
-        Button temperatureDown = new Button(this);
-        temperatureDown.setText("Temp −");
-        temperatureDown.setOnClickListener(view -> changeTemperature(-1));
-        temperatureRow.addView(temperatureDown, weightedButtonParams());
-
-        temperatureDisplay = new TextView(this);
-        temperatureDisplay.setTextSize(32);
-        temperatureDisplay.setGravity(Gravity.CENTER);
-        temperatureRow.addView(temperatureDisplay, new LinearLayout.LayoutParams(dp(120), ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        Button temperatureUp = new Button(this);
-        temperatureUp.setText("Temp +");
-        temperatureUp.setOnClickListener(view -> changeTemperature(1));
-        temperatureRow.addView(temperatureUp, weightedButtonParams());
-        root.addView(temperatureRow, matchWrapParams());
-
-        root.addView(sectionLabel("Mode"), matchWrapParams());
-        modeSelector = horizontalRadioGroup();
-        addModeButton(modeSelector, "Auto", RemoteState.Mode.AUTO);
-        addModeButton(modeSelector, "Cool", RemoteState.Mode.COOL);
-        addModeButton(modeSelector, "Dry", RemoteState.Mode.DRY);
-        addModeButton(modeSelector, "Fan", RemoteState.Mode.FAN);
-        modeSelector.setOnCheckedChangeListener((group, checkedId) -> {
-            if (!updatingSelectors) {
-                changeMode((RemoteState.Mode) group.findViewById(checkedId).getTag());
+        root.addView(label("Device"), fullWidth());
+        Spinner deviceSpinner = new Spinner(this);
+        deviceSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, DeviceType.values()));
+        deviceSpinner.setSelection(selectedDevice.ordinal());
+        deviceSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                selectedDevice = DeviceType.values()[position];
+                updateDeviceControls();
+                updateStatus();
             }
+            @Override public void onNothingSelected(AdapterView<?> parent) {}
         });
-        root.addView(modeSelector, matchWrapParams());
+        root.addView(deviceSpinner, fullWidth());
 
-        root.addView(sectionLabel("Fan"), matchWrapParams());
-        fanSelector = horizontalRadioGroup();
-        addFanButton(fanSelector, "Auto", RemoteState.FanSpeed.AUTO);
-        addFanButton(fanSelector, "Low", RemoteState.FanSpeed.LOW);
-        addFanButton(fanSelector, "Medium", RemoteState.FanSpeed.MEDIUM);
-        addFanButton(fanSelector, "High", RemoteState.FanSpeed.HIGH);
-        fanSelector.setOnCheckedChangeListener((group, checkedId) -> {
-            if (!updatingSelectors) {
-                changeFanSpeed((RemoteState.FanSpeed) group.findViewById(checkedId).getTag());
-            }
-        });
-        root.addView(fanSelector, matchWrapParams());
+        acControls = buildAcControls();
+        root.addView(acControls, fullWidth());
 
-        Button sendButton = new Button(this);
-        sendButton.setText("Send / Apply");
-        sendButton.setOnClickListener(view -> transmitStateCommand());
-        root.addView(sendButton, matchWrapParams());
-
-        LinearLayout toggleRow = horizontalRow();
-        Button ledToggle = new Button(this);
-        ledToggle.setText("LED Toggle");
-        ledToggle.setOnClickListener(view -> transmitToggle(ToggleCommand.LED_TOGGLE, "LED"));
-        toggleRow.addView(ledToggle, weightedButtonParams());
-
-        Button energySaverToggle = new Button(this);
-        energySaverToggle.setText("Energy Saver");
-        energySaverToggle.setOnClickListener(view -> transmitToggle(ToggleCommand.ENERGY_SAVER_TOGGLE, "Energy Saver"));
-        toggleRow.addView(energySaverToggle, weightedButtonParams());
-        root.addView(toggleRow, matchWrapParams());
-
-        commandPreview = new TextView(this);
-        commandPreview.setGravity(Gravity.CENTER);
-        commandPreview.setPadding(0, dp(16), 0, 0);
-        root.addView(commandPreview, matchWrapParams());
+        ledControls = buildLedControls();
+        root.addView(ledControls, fullWidth());
 
         return root;
     }
 
-    private void changeTemperature(int delta) {
-        int nextTemperature = Math.max(RemoteState.MinTemperatureF, Math.min(RemoteState.MaxTemperatureF, remoteState.getTemperatureF() + delta));
-        updateRemoteState(remoteState.getMode(), remoteState.getFanSpeed(), nextTemperature);
+    private LinearLayout buildAcControls() {
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.VERTICAL);
+        controls.setGravity(Gravity.CENTER_HORIZONTAL);
+
+        tempLabel = new TextView(this);
+        tempLabel.setTextSize(48);
+        tempLabel.setGravity(Gravity.CENTER);
+        controls.addView(tempLabel, fullWidth());
+
+        LinearLayout tempRow = new LinearLayout(this);
+        tempRow.setGravity(Gravity.CENTER);
+        Button down = button("− Temp");
+        down.setOnClickListener(v -> {
+            if (acState.getTemperatureF() > AmazonBasicsCommands.MIN_TEMP_F) {
+                acState.setTemperatureF(acState.getTemperatureF() - 1);
+            }
+            sendAcState();
+        });
+        Button up = button("+ Temp");
+        up.setOnClickListener(v -> {
+            if (acState.getTemperatureF() < AmazonBasicsCommands.MAX_TEMP_F) {
+                acState.setTemperatureF(acState.getTemperatureF() + 1);
+            }
+            sendAcState();
+        });
+        tempRow.addView(down);
+        tempRow.addView(up);
+        controls.addView(tempRow, fullWidth());
+
+        controls.addView(label("Mode"), fullWidth());
+        Spinner modeSpinner = new Spinner(this);
+        modeSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, AmazonBasicsCommands.Mode.values()));
+        modeSpinner.setSelection(acState.getMode().ordinal());
+        modeSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                acState.setMode(AmazonBasicsCommands.Mode.values()[position]);
+                updateStatus();
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent) {}
+        });
+        controls.addView(modeSpinner, fullWidth());
+
+        controls.addView(label("Fan speed"), fullWidth());
+        Spinner fanSpinner = new Spinner(this);
+        fanSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, AmazonBasicsCommands.FanSpeed.values()));
+        fanSpinner.setSelection(acState.getFanSpeed().ordinal());
+        fanSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                acState.setFanSpeed(AmazonBasicsCommands.FanSpeed.values()[position]);
+                updateStatus();
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent) {}
+        });
+        controls.addView(fanSpinner, fullWidth());
+
+        Button send = button("Send current AC setting");
+        send.setOnClickListener(v -> sendAcState());
+        controls.addView(send, fullWidth());
+
+        Button led = button("AC Display LED Toggle");
+        led.setOnClickListener(v -> sendAcCommand(AmazonBasicsCommands.ledToggle(), "AC display LED toggle sent"));
+        controls.addView(led, fullWidth());
+
+        Button energy = button("Energy Saver Toggle");
+        energy.setOnClickListener(v -> sendAcCommand(AmazonBasicsCommands.energySaverToggle(), "Energy saver toggle sent"));
+        controls.addView(energy, fullWidth());
+
+        return controls;
     }
 
-    private void changeMode(RemoteState.Mode mode) {
-        RemoteState.FanSpeed fanSpeed = remoteState.getFanSpeed();
-        if (mode == RemoteState.Mode.AUTO || mode == RemoteState.Mode.DRY) {
-            fanSpeed = RemoteState.FanSpeed.AUTO;
-        }
-        updateRemoteState(mode, fanSpeed, remoteState.getTemperatureF());
+    private LinearLayout buildLedControls() {
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.VERTICAL);
+        controls.setGravity(Gravity.CENTER_HORIZONTAL);
+
+        ledStateLabel = new TextView(this);
+        ledStateLabel.setGravity(Gravity.CENTER);
+        controls.addView(ledStateLabel, fullWidth());
+
+        controls.addView(label("LED IR commands (capture required before codes are enabled)"), fullWidth());
+
+        addLedButton(controls, LedIrCommands.Command.POWER_ON_OFF);
+
+        LinearLayout brightnessRow = new LinearLayout(this);
+        brightnessRow.setGravity(Gravity.CENTER);
+        addLedButton(brightnessRow, LedIrCommands.Command.BRIGHTNESS_DOWN);
+        addLedButton(brightnessRow, LedIrCommands.Command.BRIGHTNESS_UP);
+        controls.addView(brightnessRow, fullWidth());
+
+        LinearLayout colorRow = new LinearLayout(this);
+        colorRow.setGravity(Gravity.CENTER);
+        addLedButton(colorRow, LedIrCommands.Command.RED);
+        addLedButton(colorRow, LedIrCommands.Command.GREEN);
+        addLedButton(colorRow, LedIrCommands.Command.BLUE);
+        addLedButton(colorRow, LedIrCommands.Command.WHITE);
+        controls.addView(colorRow, fullWidth());
+
+        LinearLayout effectRow = new LinearLayout(this);
+        effectRow.setGravity(Gravity.CENTER);
+        addLedButton(effectRow, LedIrCommands.Command.MODE_EFFECT);
+        addLedButton(effectRow, LedIrCommands.Command.SPEED_DOWN);
+        addLedButton(effectRow, LedIrCommands.Command.SPEED_UP);
+        controls.addView(effectRow, fullWidth());
+
+        return controls;
     }
 
-    private void changeFanSpeed(RemoteState.FanSpeed fanSpeed) {
-        RemoteState.Mode mode = remoteState.getMode();
-        if ((mode == RemoteState.Mode.AUTO || mode == RemoteState.Mode.DRY) && fanSpeed != RemoteState.FanSpeed.AUTO) {
-            mode = RemoteState.Mode.COOL;
-            Toast.makeText(this, "Switched to Cool for selectable fan speeds.", Toast.LENGTH_SHORT).show();
-        }
-        updateRemoteState(mode, fanSpeed, remoteState.getTemperatureF());
-    }
-
-    private void updateRemoteState(RemoteState.Mode mode, RemoteState.FanSpeed fanSpeed, int temperatureF) {
-        remoteState = new RemoteState(mode, fanSpeed, temperatureF);
-        renderState();
-    }
-
-    private void renderState() {
-        temperatureDisplay.setText(String.format(Locale.US, "%d°F", remoteState.getTemperatureF()));
-        updatingSelectors = true;
-        checkTaggedButton(modeSelector, remoteState.getMode());
-        checkTaggedButton(fanSelector, remoteState.getFanSpeed());
-        updatingSelectors = false;
-        int[] commandBytes = remoteState.toCommandBytes();
-        commandPreview.setText("Command bytes: " + formatBytes(commandBytes) + "\nRaw pulses: " + irEncoder.encodeCommand(commandBytes).length);
-    }
-
-    private void transmitStateCommand() {
-        transmitCommand(remoteState.toCommandBytes(), "Remote state");
-    }
-
-    private void transmitToggle(ToggleCommand toggleCommand, String label) {
-        transmitCommand(AmazonBasicsCommands.INSTANCE.toggleCommand(toggleCommand), label);
-    }
-
-    private void transmitCommand(int[] commandBytes, String label) {
-        if (!irTransmitter.hasIrEmitter()) {
-            Toast.makeText(this, "This device does not have an IR blaster, so it cannot send " + label + ".", Toast.LENGTH_LONG).show();
-            return;
-        }
-
-        int[] rawPulses = irEncoder.encodeCommand(commandBytes);
-        irTransmitter.transmit(rawPulses, MideaIrEncoder.CarrierFrequency);
-        Toast.makeText(this, label + " sent: " + formatBytes(commandBytes), Toast.LENGTH_SHORT).show();
-    }
-
-    private void addModeButton(RadioGroup parent, String label, RemoteState.Mode mode) {
-        addTaggedRadioButton(parent, label, mode);
-    }
-
-    private void addFanButton(RadioGroup parent, String label, RemoteState.FanSpeed fanSpeed) {
-        addTaggedRadioButton(parent, label, fanSpeed);
-    }
-
-    private void addTaggedRadioButton(RadioGroup parent, String label, Object tag) {
-        RadioButton button = new RadioButton(this);
-        button.setText(label);
-        button.setTag(tag);
-        button.setId(View.generateViewId());
+    private void addLedButton(LinearLayout parent, LedIrCommands.Command command) {
+        Button button = button(command.toString());
+        button.setEnabled(LedIrCommands.hasCapturedCode(command));
+        button.setOnClickListener(v -> sendLedCommand(command));
         parent.addView(button);
     }
 
-    private void checkTaggedButton(RadioGroup group, Object tag) {
-        for (int i = 0; i < group.getChildCount(); i++) {
-            View child = group.getChildAt(i);
-            if (tag.equals(child.getTag())) {
-                group.check(child.getId());
-                return;
+    private void sendAcState() {
+        try {
+            sendAcCommand(acState.toCommandBytes(), "Sent " + acState.describe());
+        } catch (IllegalArgumentException ex) {
+            Toast.makeText(this, ex.getMessage(), Toast.LENGTH_LONG).show();
+        }
+        updateStatus();
+    }
+
+    private void sendAcCommand(int[] command, String message) {
+        try {
+            irTransmitter.transmit(command);
+            Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+        } catch (IllegalStateException ex) {
+            Toast.makeText(this, ex.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void sendLedCommand(LedIrCommands.Command command) {
+        try {
+            irTransmitter.transmitRaw(LedIrCommands.CARRIER_FREQUENCY_HZ, LedIrCommands.rawPulsesFor(command));
+            Toast.makeText(this, command + " sent", Toast.LENGTH_SHORT).show();
+            updateLedState(command);
+        } catch (IllegalStateException ex) {
+            Toast.makeText(this, ex.getMessage(), Toast.LENGTH_LONG).show();
+        }
+        updateStatus();
+    }
+
+    private void updateLedState(LedIrCommands.Command command) {
+        switch (command) {
+            case POWER_ON_OFF:
+                ledState.setPowerOn(!ledState.isPowerOn());
+                break;
+            case BRIGHTNESS_DOWN:
+                ledState.setBrightnessPercent(Math.max(0, ledState.getBrightnessPercent() - 10));
+                break;
+            case BRIGHTNESS_UP:
+                ledState.setBrightnessPercent(Math.min(100, ledState.getBrightnessPercent() + 10));
+                break;
+        }
+    }
+
+    private void updateDeviceControls() {
+        if (acControls != null) acControls.setVisibility(selectedDevice == DeviceType.AMAZON_BASICS_AC ? View.VISIBLE : View.GONE);
+        if (ledControls != null) ledControls.setVisibility(selectedDevice == DeviceType.LED_IR_CONTROLLER ? View.VISIBLE : View.GONE);
+    }
+
+    private void updateStatus() {
+        if (tempLabel != null) tempLabel.setText(acState.getTemperatureF() + "°F");
+        if (ledStateLabel != null) ledStateLabel.setText(ledState.describe());
+        if (status != null) {
+            if (selectedDevice == DeviceType.AMAZON_BASICS_AC) {
+                status.setText(irTransmitter.hasEmitter() ? "AC selected / IR blaster detected" : "AC selected / No IR blaster detected");
+            } else {
+                status.setText(irTransmitter.hasEmitter() ? "LED selected / IR blaster detected / capture pending" : "LED selected / No IR blaster detected");
             }
         }
     }
 
-    private TextView sectionLabel(String label) {
-        TextView view = new TextView(this);
-        view.setText(label);
-        view.setTextSize(18);
-        view.setPadding(0, dp(16), 0, 0);
-        return view;
-    }
-
-    private RadioGroup horizontalRadioGroup() {
-        RadioGroup group = new RadioGroup(this);
-        group.setOrientation(RadioGroup.HORIZONTAL);
-        group.setGravity(Gravity.CENTER);
-        return group;
-    }
-
-    private LinearLayout horizontalRow() {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER);
-        return row;
-    }
-
-    private LinearLayout.LayoutParams matchWrapParams() {
-        return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-    }
-
-    private LinearLayout.LayoutParams weightedButtonParams() {
-        return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-    }
-
-    private String formatBytes(int[] bytes) {
-        StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < bytes.length; i++) {
-            if (i > 0) {
-                builder.append(' ');
-            }
-            builder.append(String.format(Locale.US, "%02X", bytes[i]));
-        }
-        return builder.toString();
-    }
-
-    private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
-    }
+    private TextView label(String text) { TextView v = new TextView(this); v.setText(text); v.setTextSize(16); return v; }
+    private Button button(String text) { Button b = new Button(this); b.setText(text); return b; }
+    private LinearLayout.LayoutParams fullWidth() { return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT); }
 }

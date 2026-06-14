@@ -1,14 +1,20 @@
-<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
     <uses-permission android:name="android.permission.TRANSMIT_IR" />
-    <uses-feature
-        android:name="android.hardware.consumerir"
-        android:required="false" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <uses-feature android:name="android.hardware.consumerir" android:required="true" />
 
     <application
         android:allowBackup="true"
+        android:icon="@drawable/ic_launcher"
         android:label="Amazon Basics IR Remote"
+        android:roundIcon="@drawable/ic_launcher"
+        android:supportsRtl="true"
         android:theme="@style/AppTheme">
         <activity
             android:name=".MainActivity"
@@ -19,5 +25,4 @@
             </intent-filter>
         </activity>
     </application>
-
 </manifest>
