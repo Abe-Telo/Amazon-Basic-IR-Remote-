@@ -1,7 +1,6 @@
 package com.example.amazonbasicsirremote;
 
 import android.app.Activity;
-import android.hardware.ConsumerIrManager;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.ViewGroup;
@@ -12,12 +11,12 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 public class MainActivity extends Activity {
-    private ConsumerIrManager irManager;
+    private IrTransmitter irTransmitter;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        irManager = (ConsumerIrManager) getSystemService(CONSUMER_IR_SERVICE);
+        irTransmitter = new IrTransmitter(this);
         setContentView(createRemoteLayout());
     }
 
@@ -71,12 +70,12 @@ public class MainActivity extends Activity {
     }
 
     private void transmitSampleCommand(String label, int command) {
-        if (irManager == null || !irManager.hasIrEmitter()) {
-            Toast.makeText(this, "No IR emitter available for " + label, Toast.LENGTH_SHORT).show();
+        if (!irTransmitter.hasIrEmitter()) {
+            Toast.makeText(this, "This device does not have an IR blaster, so it cannot send " + label + ".", Toast.LENGTH_LONG).show();
             return;
         }
 
-        irManager.transmit(38_000, buildNecPattern(0x00FF, command));
+        irTransmitter.transmit(buildNecPattern(0x00FF, command));
         Toast.makeText(this, label + " command sent", Toast.LENGTH_SHORT).show();
     }
 
