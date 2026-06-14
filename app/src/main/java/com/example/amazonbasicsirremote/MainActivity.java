@@ -41,6 +41,9 @@ public class MainActivity extends Activity {
     private RadioGroup transportSelector;
     private RadioButton irTransportButton;
     private RadioButton btTransportButton;
+    private DeviceDiscoveryType selectedDiscoveryType = DeviceDiscoveryType.IR_MANUAL;
+    private String wifiDiscoveryStatus = "Wi-Fi/LAN discovery is ready";
+    private final WifiDeviceDiscovery wifiDeviceDiscovery = new WifiDeviceDiscovery();
     private final Map<LedIrCommands.Command, Button> ledButtons = new EnumMap<>(LedIrCommands.Command.class);
     private IrTransmitter irTransmitter;
     private LedBleClient ledBleClient;
@@ -102,6 +105,9 @@ public class MainActivity extends Activity {
         });
         root.addView(deviceSpinner, fullWidth());
 
+        root.addView(label("Discovery"), fullWidth());
+        root.addView(buildDiscoveryControls(), fullWidth());
+
         acControls = buildAcControls();
         root.addView(acControls, fullWidth());
 
@@ -112,6 +118,49 @@ public class MainActivity extends Activity {
         root.addView(transportSelector, fullWidth());
 
         return root;
+    }
+
+
+    private LinearLayout buildDiscoveryControls() {
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.HORIZONTAL);
+        controls.setGravity(Gravity.CENTER);
+
+        Button scanBluetooth = button("Scan Bluetooth");
+        scanBluetooth.setOnClickListener(v -> {
+            selectedDiscoveryType = DeviceDiscoveryType.BLE;
+            bluetoothStatus = "Bluetooth scanning";
+            if (hasBlePermissions()) {
+                ledBleClient.connectFirstKnownLedDevice();
+            } else {
+                requestBlePermissionsIfNeeded();
+                bluetoothStatus = "BLE permissions are required before scanning";
+            }
+            updateStatus();
+        });
+        controls.addView(scanBluetooth);
+
+        Button findWifiDevices = button("Find Wi-Fi devices");
+        findWifiDevices.setOnClickListener(v -> {
+            selectedDiscoveryType = DeviceDiscoveryType.WIFI_LAN;
+            wifiDiscoveryStatus = "Wi-Fi/LAN discovery placeholder: "
+                    + wifiDeviceDiscovery.describePlannedDiscoveryMethods()
+                    + " will be added by device type";
+            Toast.makeText(this, "Wi-Fi discovery will be added by device type", Toast.LENGTH_LONG).show();
+            updateStatus();
+        });
+        controls.addView(findWifiDevices);
+
+        Button addIrRemote = button("Add IR remote");
+        addIrRemote.setOnClickListener(v -> {
+            selectedDiscoveryType = DeviceDiscoveryType.IR_MANUAL;
+            selectedTransport = ControlTransport.IR;
+            syncTransportSelector();
+            updateStatus();
+        });
+        controls.addView(addIrRemote);
+
+        return controls;
     }
 
     private LinearLayout buildAcControls() {
@@ -202,6 +251,9 @@ public class MainActivity extends Activity {
 
         group.setOnCheckedChangeListener((radioGroup, checkedId) -> {
             selectedTransport = checkedId == btTransportButton.getId() ? ControlTransport.BT : ControlTransport.IR;
+            selectedDiscoveryType = selectedTransport == ControlTransport.BT
+                    ? DeviceDiscoveryType.BLE
+                    : DeviceDiscoveryType.IR_MANUAL;
             updateLedButtonStates();
             if (selectedTransport == ControlTransport.BT) {
                 bluetoothStatus = "Bluetooth scanning";
@@ -397,7 +449,9 @@ public class MainActivity extends Activity {
         if (tempLabel != null) tempLabel.setText(acState.getTemperatureF() + "°F");
         if (ledStateLabel != null) ledStateLabel.setText(ledState.describe());
         if (status != null) {
-            if (selectedTransport == ControlTransport.BT) {
+            if (selectedDiscoveryType == DeviceDiscoveryType.WIFI_LAN) {
+                status.setText(wifiDiscoveryStatus);
+            } else if (selectedDiscoveryType == DeviceDiscoveryType.BLE || selectedTransport == ControlTransport.BT) {
                 status.setText(bluetoothStatus);
             } else {
                 status.setText(irTransmitter.hasEmitter() ? "IR ready" : "No IR blaster detected");
