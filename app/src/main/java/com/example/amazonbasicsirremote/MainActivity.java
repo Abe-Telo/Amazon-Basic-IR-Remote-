@@ -1,9 +1,6 @@
 package com.example.amazonbasicsirremote;
 
-import android.Manifest;
 import android.app.Activity;
-import android.content.pm.PackageManager;
-import android.os.Build;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
@@ -30,29 +27,11 @@ public class MainActivity extends Activity {
     private LinearLayout acControls;
     private LinearLayout ledControls;
     private IrTransmitter irTransmitter;
-    private LedBleClient ledBleClient;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         irTransmitter = new IrTransmitter(this);
-        ledBleClient = new LedBleClient(this, new LedBleClient.Listener() {
-            @Override public void onStatusChanged(String message) {
-                runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, message, Toast.LENGTH_SHORT).show();
-                    updateStatus();
-                });
-            }
-
-            @Override public void onDeviceFound(String name) {
-                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Found " + name, Toast.LENGTH_SHORT).show());
-            }
-
-            @Override public void onServicesDiscovered() {
-                runOnUiThread(() -> updateStatus());
-            }
-        });
-        requestBlePermissionsIfNeeded();
         setContentView(buildUi());
         updateDeviceControls();
         updateStatus();
@@ -177,29 +156,39 @@ public class MainActivity extends Activity {
         ledStateLabel.setGravity(Gravity.CENTER);
         controls.addView(ledStateLabel, fullWidth());
 
-        Button scan = button("Scan/connect LED BLE");
-        scan.setOnClickListener(v -> {
-            if (requestBlePermissionsIfNeeded()) {
-                ledBleClient.startScan();
-            }
-        });
-        controls.addView(scan, fullWidth());
+        controls.addView(label("LED IR commands (capture required before codes are enabled)"), fullWidth());
 
-        Button power = button("LED Power Toggle");
-        power.setOnClickListener(v -> sendLedCommand(LedIrCommands.Command.POWER_TOGGLE));
-        controls.addView(power, fullWidth());
+        addLedButton(controls, LedIrCommands.Command.POWER_ON_OFF);
 
         LinearLayout brightnessRow = new LinearLayout(this);
         brightnessRow.setGravity(Gravity.CENTER);
-        Button brightnessDown = button("− Brightness");
-        brightnessDown.setOnClickListener(v -> sendLedCommand(LedIrCommands.Command.BRIGHTNESS_DOWN));
-        Button brightnessUp = button("+ Brightness");
-        brightnessUp.setOnClickListener(v -> sendLedCommand(LedIrCommands.Command.BRIGHTNESS_UP));
-        brightnessRow.addView(brightnessDown);
-        brightnessRow.addView(brightnessUp);
+        addLedButton(brightnessRow, LedIrCommands.Command.BRIGHTNESS_DOWN);
+        addLedButton(brightnessRow, LedIrCommands.Command.BRIGHTNESS_UP);
         controls.addView(brightnessRow, fullWidth());
 
+        LinearLayout colorRow = new LinearLayout(this);
+        colorRow.setGravity(Gravity.CENTER);
+        addLedButton(colorRow, LedIrCommands.Command.RED);
+        addLedButton(colorRow, LedIrCommands.Command.GREEN);
+        addLedButton(colorRow, LedIrCommands.Command.BLUE);
+        addLedButton(colorRow, LedIrCommands.Command.WHITE);
+        controls.addView(colorRow, fullWidth());
+
+        LinearLayout effectRow = new LinearLayout(this);
+        effectRow.setGravity(Gravity.CENTER);
+        addLedButton(effectRow, LedIrCommands.Command.MODE_EFFECT);
+        addLedButton(effectRow, LedIrCommands.Command.SPEED_DOWN);
+        addLedButton(effectRow, LedIrCommands.Command.SPEED_UP);
+        controls.addView(effectRow, fullWidth());
+
         return controls;
+    }
+
+    private void addLedButton(LinearLayout parent, LedIrCommands.Command command) {
+        Button button = button(command.toString());
+        button.setEnabled(LedIrCommands.hasCapturedCode(command));
+        button.setOnClickListener(v -> sendLedCommand(command));
+        parent.addView(button);
     }
 
     private void sendAcState() {
@@ -221,9 +210,19 @@ public class MainActivity extends Activity {
     }
 
     private void sendLedCommand(LedIrCommands.Command command) {
-        LedIrCommands.forCommand(command);
+        try {
+            irTransmitter.transmitRaw(LedIrCommands.CARRIER_FREQUENCY_HZ, LedIrCommands.rawPulsesFor(command));
+            Toast.makeText(this, command + " sent", Toast.LENGTH_SHORT).show();
+            updateLedState(command);
+        } catch (IllegalStateException ex) {
+            Toast.makeText(this, ex.getMessage(), Toast.LENGTH_LONG).show();
+        }
+        updateStatus();
+    }
+
+    private void updateLedState(LedIrCommands.Command command) {
         switch (command) {
-            case POWER_TOGGLE:
+            case POWER_ON_OFF:
                 ledState.setPowerOn(!ledState.isPowerOn());
                 break;
             case BRIGHTNESS_DOWN:
@@ -233,13 +232,11 @@ public class MainActivity extends Activity {
                 ledState.setBrightnessPercent(Math.min(100, ledState.getBrightnessPercent() + 10));
                 break;
         }
-        ledBleClient.writeCommand(toByteArray(LedIrCommands.forCommand(command)));
-        updateStatus();
     }
 
     private void updateDeviceControls() {
         if (acControls != null) acControls.setVisibility(selectedDevice == DeviceType.AMAZON_BASICS_AC ? View.VISIBLE : View.GONE);
-        if (ledControls != null) ledControls.setVisibility(selectedDevice == DeviceType.LED_BLE_CONTROLLER ? View.VISIBLE : View.GONE);
+        if (ledControls != null) ledControls.setVisibility(selectedDevice == DeviceType.LED_IR_CONTROLLER ? View.VISIBLE : View.GONE);
     }
 
     private void updateStatus() {
@@ -249,62 +246,9 @@ public class MainActivity extends Activity {
             if (selectedDevice == DeviceType.AMAZON_BASICS_AC) {
                 status.setText(irTransmitter.hasEmitter() ? "AC selected / IR blaster detected" : "AC selected / No IR blaster detected");
             } else {
-                status.setText(LedBleController.isAvailable() ? "LED selected / BLE available" : "LED selected / Bluetooth disabled or unavailable");
+                status.setText(irTransmitter.hasEmitter() ? "LED selected / IR blaster detected / capture pending" : "LED selected / No IR blaster detected");
             }
         }
-    }
-
-    @Override
-    protected void onDestroy() {
-        if (ledBleClient != null) {
-            ledBleClient.disconnect();
-        }
-        super.onDestroy();
-    }
-
-    private boolean requestBlePermissionsIfNeeded() {
-        String[] permissions;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            permissions = new String[] { Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT };
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            permissions = new String[] { Manifest.permission.ACCESS_FINE_LOCATION };
-        } else {
-            return true;
-        }
-
-        boolean missingPermission = false;
-        for (String permission : permissions) {
-            if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) {
-                missingPermission = true;
-                break;
-            }
-        }
-        if (missingPermission) {
-            requestPermissions(permissions, 1001);
-            return false;
-        }
-        return true;
-    }
-
-    @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode != 1001) return;
-        for (int result : grantResults) {
-            if (result != PackageManager.PERMISSION_GRANTED) {
-                Toast.makeText(this, "BLE permissions denied", Toast.LENGTH_LONG).show();
-                return;
-            }
-        }
-        Toast.makeText(this, "BLE permissions granted", Toast.LENGTH_SHORT).show();
-    }
-
-    private byte[] toByteArray(int[] command) {
-        byte[] bytes = new byte[command.length];
-        for (int i = 0; i < command.length; i++) {
-            bytes[i] = (byte) command[i];
-        }
-        return bytes;
     }
 
     private TextView label(String text) { TextView v = new TextView(this); v.setText(text); v.setTextSize(16); return v; }

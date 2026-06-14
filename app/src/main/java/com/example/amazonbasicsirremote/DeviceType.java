@@ -2,7 +2,7 @@ package com.example.amazonbasicsirremote;
 
 enum DeviceType {
     AMAZON_BASICS_AC("Amazon Basics AC"),
-    LED_BLE_CONTROLLER("LED BLE Controller");
+    LED_IR_CONTROLLER("LED IR Controller");
 
     private final String displayName;
 
