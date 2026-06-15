@@ -5,13 +5,13 @@ import org.junit.Test
 import java.io.File
 
 class MideaIrEncoderTest {
-    private val encoder = MideaIrEncoder()
+    private val encoder = MideaIrCommandEncoder()
 
     @Test
     fun autoAuto62FMatchesFlipperCapture() {
         assertEncodedCommandMatchesFlipperCapture(
             flipperName = "Auto_Auto_62F",
-            command = AmazonBasicsCommands.temperatureCommand(TemperatureModeFan.AUTO_AUTO, 62),
+            command = AmazonBasicsCommandFixtures.temperatureCommand(TemperatureModeFan.AUTO_AUTO, 62),
         )
     }
 
@@ -19,7 +19,7 @@ class MideaIrEncoderTest {
     fun coolAuto72FMatchesFlipperCapture() {
         assertEncodedCommandMatchesFlipperCapture(
             flipperName = "Cool_Auto_72F",
-            command = AmazonBasicsCommands.temperatureCommand(TemperatureModeFan.COOL_AUTO, 72),
+            command = AmazonBasicsCommandFixtures.temperatureCommand(TemperatureModeFan.COOL_AUTO, 72),
         )
     }
 
@@ -27,7 +27,7 @@ class MideaIrEncoderTest {
     fun coolLow72FMatchesFlipperCapture() {
         assertEncodedCommandMatchesFlipperCapture(
             flipperName = "Cool_Low_72F",
-            command = AmazonBasicsCommands.temperatureCommand(TemperatureModeFan.COOL_LOW, 72),
+            command = AmazonBasicsCommandFixtures.temperatureCommand(TemperatureModeFan.COOL_LOW, 72),
         )
     }
 
@@ -35,7 +35,7 @@ class MideaIrEncoderTest {
     fun fanAutoMatchesFlipperCapture() {
         assertEncodedCommandMatchesFlipperCapture(
             flipperName = "Fan_Auto",
-            command = AmazonBasicsCommands.fanOnlyCommand(FanSpeed.AUTO),
+            command = AmazonBasicsCommandFixtures.fanOnlyCommand(FanSpeed.AUTO),
         )
     }
 
@@ -43,7 +43,7 @@ class MideaIrEncoderTest {
     fun ledToggleMatchesFlipperCapture() {
         assertEncodedCommandMatchesFlipperCapture(
             flipperName = "LED_Toggle",
-            command = AmazonBasicsCommands.toggleCommand(ToggleCommand.LED_TOGGLE),
+            command = AmazonBasicsCommandFixtures.toggleCommand(ToggleCommand.LED_TOGGLE),
         )
     }
 
@@ -51,7 +51,7 @@ class MideaIrEncoderTest {
     fun energySaverToggleMatchesFlipperCapture() {
         assertEncodedCommandMatchesFlipperCapture(
             flipperName = "Energy_Saver_Toggle",
-            command = AmazonBasicsCommands.toggleCommand(ToggleCommand.ENERGY_SAVER_TOGGLE),
+            command = AmazonBasicsCommandFixtures.toggleCommand(ToggleCommand.ENERGY_SAVER_TOGGLE),
         )
     }
 
