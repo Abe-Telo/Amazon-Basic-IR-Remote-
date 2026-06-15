@@ -7,7 +7,7 @@ package com.example.amazonbasicsirremote
  * as one six-byte frame followed by a frame gap and a second frame containing
  * the bitwise complement of the first frame.
  */
-class MideaIrEncoder {
+class MideaIrCommandEncoder {
     fun encodeCommand(bytes: IntArray): IntArray {
         require(bytes.size == CommandByteCount) { "Midea commands must contain exactly $CommandByteCount bytes." }
         bytes.forEach { byte ->
@@ -75,5 +75,5 @@ internal object MideaIrEncoderValidation {
     )
 
     fun validateAutoAuto62F(): Boolean =
-        MideaIrEncoder().encodeCommand(autoAuto62FCommand).contentEquals(autoAuto62FRaw)
+        MideaIrCommandEncoder().encodeCommand(autoAuto62FCommand).contentEquals(autoAuto62FRaw)
 }

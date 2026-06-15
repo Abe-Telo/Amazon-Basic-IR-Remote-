@@ -6,7 +6,7 @@ package com.example.amazonbasicsirremote
  * Temperature-bearing commands are available for 62F..86F. Fan-only and toggle
  * commands use the exact six-byte payloads supplied with the captures.
  */
-object AmazonBasicsCommands {
+object AmazonBasicsCommandFixtures {
     val TemperatureRange: IntRange = RemoteState.TemperatureRange
 
     val TemperatureCommands: Map<TemperatureCommandKey, IntArray> = buildMap {
@@ -45,8 +45,8 @@ data class TemperatureCommandKey(
     val temperatureF: Int,
 ) {
     init {
-        require(temperatureF in AmazonBasicsCommands.TemperatureRange) {
-            "temperatureF must be in ${AmazonBasicsCommands.TemperatureRange}: $temperatureF"
+        require(temperatureF in AmazonBasicsCommandFixtures.TemperatureRange) {
+            "temperatureF must be in ${AmazonBasicsCommandFixtures.TemperatureRange}: $temperatureF"
         }
     }
 }
